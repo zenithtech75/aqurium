@@ -44,7 +44,7 @@
   <!-- CARD 2 : TIMED RELAY -->
   <div class="card">
     <div class="card-header" onclick="toggleCard('c2')">
-      Timed Relay
+      Timer Relay
       <span>⏱️</span>
     </div>
     <div class="card-content" id="c2">
@@ -53,7 +53,7 @@
       <button id="bt" class="relayBtn off" onclick="startTimed()">Start</button>
       <div id="info" style="margin-top:8px;font-weight:bold;"></div>
       <div class="progress"><div id="bar" class="bar"></div></div>
-      <div class="small" style="margin-top:8px">Starting writes <code>device1/timed = {state:1, duration_ms:...}</code> — ESP will compute end & run locally.</div>
+      <div class="small" style="margin-top:8px">Starting writes <code>device1/timer/enabled = 1</code> — ESP will run locally.</div>
     </div>
   </div>
 
@@ -73,111 +73,93 @@
   <div style="text-align:center;margin-top:8px;color:#666;font-size:13px">Hosted via Firebase — accessible from any network</div>
 </div>
 
-<!-- Firebase module -->
 <script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-  import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-  // --- Your Firebase config (as you provided) ---
-  const firebaseConfig = {
-    apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
-    authDomain: "mitdht.firebaseapp.com",
-    databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
-    projectId: "mitdht",
-    storageBucket: "mitdht.firebasestorage.app",
-    messagingSenderId: "994832787139",
-    appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
-    measurementId: "G-EWMWECH4BZ"
-  };
+// --- Firebase config ---
+const firebaseConfig = {
+  apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
+  authDomain: "mitdht.firebaseapp.com",
+  databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
+  projectId: "mitdht",
+  storageBucket: "mitdht.firebasestorage.app",
+  messagingSenderId: "994832787139",
+  appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
+  measurementId: "G-EWMWECH4BZ"
+};
 
-  const app = initializeApp(firebaseConfig);
-  const db = getDatabase();
+const app = initializeApp(firebaseConfig);
+const db = getDatabase();
 
-  // helper to toggle card
-  function toggleCard(id){
-    const c = document.getElementById(id);
-    if(c.classList.contains('open')){
-      c.style.maxHeight = '0px';
-      c.classList.remove('open');
-    } else {
-      c.style.maxHeight = c.scrollHeight + 'px';
-      c.classList.add('open');
-    }
+// --- Helper to toggle card ---
+function toggleCard(id){
+  const c = document.getElementById(id);
+  if(c.classList.contains('open')){
+    c.style.maxHeight = '0px';
+    c.classList.remove('open');
+  } else {
+    c.style.maxHeight = c.scrollHeight + 'px';
+    c.classList.add('open');
   }
-  window.toggleCard = toggleCard;
+}
+window.toggleCard = toggleCard;
 
-  // --- Relay listeners & toggles (device1/relay1 etc) ---
-  function listenRelay(n, btnId){
-    onValue(ref(db, `device1/relay${n}`), snap => {
-      const v = snap.exists() ? snap.val() : 0;
-      const btn = document.getElementById(btnId);
-      if(v == 1){ btn.className='relayBtn on'; btn.innerText=`Relay${n} ON`; }
-      else { btn.className='relayBtn off'; btn.innerText=`Relay${n} OFF`; }
-    });
-  }
-  listenRelay(1,'b1'); listenRelay(2,'b2'); listenRelay(3,'b3');
-
-  // Toggle: write 0/1 to device1/relayN
-  async function toggleRelay(n){
-    const path = `device1/relay${n}`;
-    // read current once
-    let cur = 0;
-    await new Promise(res => onValue(ref(db, path), snap => { cur = snap.exists()? snap.val():0; res(); }, { onlyOnce: true }));
-    const newVal = cur === 1 ? 0 : 1;
-    await set(ref(db, path), newVal);
-  }
-  window.toggleRelay = toggleRelay;
-
-  // --- Sensor listeners (device1/sensor/temp & hum) ---
-  onValue(ref(db, 'device1/sensor/temp'), snap => {
-    const v = snap.exists() ? snap.val() : null;
-    document.getElementById('temp').innerText = (v === null ? '--' : Number(v).toFixed(2));
+// --- Relay listeners ---
+function listenRelay(n, btnId){
+  onValue(ref(db, `device1/relay${n}`), snap=>{
+    const v = snap.exists()? snap.val():0;
+    const btn = document.getElementById(btnId);
+    if(v==1){ btn.className='relayBtn on'; btn.innerText=`Relay${n} ON`; }
+    else{ btn.className='relayBtn off'; btn.innerText=`Relay${n} OFF`; }
   });
-  onValue(ref(db, 'device1/sensor/hum'), snap => {
-    const v = snap.exists() ? snap.val() : null;
-    document.getElementById('hum').innerText = (v === null ? '--' : Number(v).toFixed(2));
-  });
-  // optionally last update string if you store it: device1/sensor/last
-  onValue(ref(db, 'device1/sensor/last'), snap => {
-    const v = snap.exists() ? snap.val() : null;
-    document.getElementById('last').innerText = v ? v : '--';
-  });
+}
+listenRelay(1,'b1'); listenRelay(2,'b2'); listenRelay(3,'b3');
 
-  // --- Timed listener: device1/timed/state,duration_ms,end ---
-  let curDuration = 0;
-  let curEnd = 0;
-  onValue(ref(db, 'device1/timed/duration_ms'), snap => { curDuration = snap.exists()? snap.val():0; });
-  onValue(ref(db, 'device1/timed/end'), snap => { curEnd = snap.exists()? snap.val():0; });
-  onValue(ref(db, 'device1/timed/state'), snap => {
-    const st = snap.exists()? snap.val():0;
-    const bt = document.getElementById('bt');
-    if(st == 1){ bt.className='relayBtn running'; bt.innerText='RUNNING...'; }
-    else { bt.className='relayBtn off'; bt.innerText='Start'; document.getElementById('bar').style.width='0%'; document.getElementById('info').innerText=''; }
-  });
+// --- Toggle relay ---
+async function toggleRelay(n){
+  const path = `device1/relay${n}`;
+  let cur=0;
+  await new Promise(res => onValue(ref(db,path),snap=>{ cur=snap.exists()? snap.val():0; res(); }, { onlyOnce:true }));
+  const newVal = cur===1?0:1;
+  await set(ref(db,path), newVal);
+}
+window.toggleRelay = toggleRelay;
 
-  // smooth update of progress
-  function tickProgress(){
-    if(curDuration > 0 && curEnd > 0){
-      const remaining = Math.max(0, curEnd - Date.now());
-      const used = Math.max(0, curDuration - remaining);
-      const pct = Math.min(100, Math.max(0, (used/curDuration)*100));
-      document.getElementById('bar').style.width = pct + '%';
-      document.getElementById('info').innerText = 'Auto-off in ' + Math.round(remaining) + ' ms';
-    }
-    requestAnimationFrame(tickProgress);
-  }
+// --- Sensor listeners ---
+onValue(ref(db,'device1/temperature'), snap=>{
+  document.getElementById('temp').innerText = snap.exists()? Number(snap.val()).toFixed(2): '--';
+});
+onValue(ref(db,'device1/humidity'), snap=>{
+  document.getElementById('hum').innerText = snap.exists()? Number(snap.val()).toFixed(2): '--';
+});
+
+// --- Timer listener ---
+let curDuration = 0;
+let curEnd = 0;
+
+onValue(ref(db,'device1/timer/enabled'), snap=>{
+  const st = snap.exists()? snap.val():0;
+  const bt = document.getElementById('bt');
+  if(st==1){ bt.className='relayBtn running'; bt.innerText='RUNNING...'; }
+  else{ bt.className='relayBtn off'; bt.innerText='Start'; document.getElementById('bar').style.width='0%'; document.getElementById('info').innerText=''; }
+});
+
+// --- Progress bar (optional smooth update) ---
+function tickProgress(){
+  // ESP handles timing; this shows progress if desired
   requestAnimationFrame(tickProgress);
+}
+requestAnimationFrame(tickProgress);
 
-  // Start timed: write {state:1, duration_ms:..., end:0} — ESP will compute end and run
-  async function startTimed(){
-    const msVal = parseInt(document.getElementById('ms').value);
-    if(!msVal || msVal <= 0){ alert('Enter milliseconds > 0'); return; }
-    // write timed object with state=1 and duration_ms (ESP will compute end)
-    // Using set/ update on device1/timed
-    await set(ref(db, 'device1/timed'), { state: 1, duration_ms: msVal, end: 0 });
-  }
-  window.startTimed = startTimed;
-
+// --- Start timed ---
+async function startTimed(){
+  const msVal = parseInt(document.getElementById('ms').value);
+  if(!msVal || msVal<=0){ alert('Enter milliseconds > 0'); return; }
+  // Write timer enabled = 1, ESP will handle timing locally
+  await set(ref(db,'device1/timer/enabled'),1);
+}
+window.startTimed = startTimed;
 </script>
 </body>
 </html>
