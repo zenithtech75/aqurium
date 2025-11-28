@@ -1,120 +1,200 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
 <head>
-  <title>ESP32 Control Panel</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-
-  <style>
-    body { 
-      font-family: Arial; 
-      text-align: center; 
-      padding: 20px;
-    }
-    button {
-      padding: 12px 25px;
-      margin: 10px;
-      font-size: 18px;
-      border: none;
-      border-radius: 6px;
-      cursor: pointer;
-    }
-    .on  { background: #4CAF50; color: white; }
-    .off { background: #f44336; color: white; }
-    .timed { background: #2196F3; color: white; }
-    .card {
-      padding: 20px;
-      margin: 15px auto;
-      width: 90%;
-      max-width: 500px;
-      border-radius: 10px;
-      background: #f5f5f5;
-      box-shadow: 0 0 6px rgba(0,0,0,0.2);
-    }
-  </style>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>ESP32 Cloud UI (device1)</title>
+<style>
+  body{font-family:Arial;margin:12px;background:#f6f7fb}
+  h2{margin-top:6px;text-align:center}
+  .card{border:1px solid #ddd;border-radius:12px;margin:12px auto;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);background:#fff;max-width:720px;padding:12px}
+  .card-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:8px 4px}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .relayBtn{width:140px;padding:10px;border:none;color:#fff;border-radius:8px;margin:6px;font-size:16px;cursor:pointer}
+  .on{background:#2e7d32}
+  .off{background:#c62828}
+  .running{background:#fb8c00}
+  .progress{width:100%;height:18px;border-radius:9px;background:#ddd;overflow:hidden;margin-top:8px}
+  .bar{height:100%;width:0%;background:#2e7d32;transition:width 0.08s linear}
+  label{font-weight:bold}
+  input[type=number]{padding:8px;border-radius:6px;border:1px solid #ccc;width:150px}
+  .small{font-size:13px;color:#666;margin-top:6px}
+  .center{max-width:720px;margin:6px auto;text-align:center}
+</style>
 </head>
-
 <body>
 
-<h1>ESP32 Global Controller</h1>
+<h2>ESP32 Web Control (device1)</h2>
 
 <div class="card">
-  <h2>Sensor</h2>
-  <p><b>Temperature:</b> <span id="temp">--</span> °C</p>
-  <p><b>Humidity:</b> <span id="hum">--</span> %</p>
+  <div class="card-header" onclick="toggleCard('c1')">
+    <div>🔧 Manual Relays</div><div>click to expand</div>
+  </div>
+  <div class="card-content" id="c1" style="max-height:220px;">
+    <div class="row" style="padding:8px 4px">
+      <button id="b1" class="relayBtn off" onclick="toggleRelay(1)">Relay1 OFF</button>
+      <button id="b2" class="relayBtn off" onclick="toggleRelay(2)">Relay2 OFF</button>
+      <button id="b3" class="relayBtn off" onclick="toggleRelay(3)">Relay3 OFF</button>
+    </div>
+    <div class="small" style="padding:0 8px">Buttons write to <code>device1/relay1..3</code> in Firebase.</div>
+  </div>
 </div>
 
 <div class="card">
-  <h2>Relays</h2>
-  <button id="r1" onclick="toggleRelay(1)">Relay 1</button>
-  <button id="r2" onclick="toggleRelay(2)">Relay 2</button>
-  <button id="r3" onclick="toggleRelay(3)">Relay 3</button>
+  <div class="card-header" onclick="toggleCard('c2')">
+    <div>⏱ Timed Relay</div><div>start/stop via Firebase command</div>
+  </div>
+  <div class="card-content" id="c2" style="max-height:240px;padding:12px;">
+    <label>Duration (ms)</label><br>
+    <input id="ms" type="number" value="5000" min="1"><br><br>
+    <button id="bt" class="relayBtn off" onclick="startTimer()">Start</button>
+    <div id="info" style="margin-top:8px;font-weight:bold"></div>
+    <div class="progress"><div id="bar" class="bar"></div></div>
+    <div class="small" style="margin-top:8px">Website writes the object to <code>device1/timed</code>. ESP must listen and start timer.</div>
+  </div>
 </div>
 
 <div class="card">
-  <h2>Timed Relay ⏱️</h2>
-
-  <label><b>Duration (ms)</b></label><br>
-  <input type="number" id="delayInput" value="5000" 
-         style="padding:10px; font-size:18px; width:150px; margin:10px;">
-  <br>
-
-  <button class="timed" onclick="startTimed()">RUN TIMED RELAY</button>
-
-  <p><b>Remaining:</b> <span id="countdown">0</span> ms</p>
+  <div class="card-header" onclick="toggleCard('c3')">
+    <div>🌡 Sensor Readings</div><div>live from Firebase</div>
+  </div>
+  <div class="card-content" id="c3" style="max-height:200px;padding:12px;">
+    <p>Temperature: <strong><span id="temp">--</span> °C</strong></p>
+    <p>Humidity: <strong><span id="hum">--</span> %</strong></p>
+    <p>Last update: <strong><span id="last">--</span></strong></p>
+  </div>
 </div>
 
-<script>
-// ======================= API CALLS ============================
-function toggleRelay(num) {
-  fetch(`/api/toggle?relay=${num}`);
-}
+<div class="center small">Firebase DB: <code>mitdht-default-rtdb</code> — paths under <code>device1/</code></div>
 
-function startTimed() {
-  let ms = document.getElementById("delayInput").value;
-  fetch(`/api/setTimed?duration=${ms}`);
-}
+<script type="module">
+// ---------- Firebase imports ----------
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-// ==================== AUTO REFRESH STATUS =====================
-setInterval(fetchStatus, 1000);
+// ---------- Your Firebase config ----------
+const firebaseConfig = {
+  apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
+  authDomain: "mitdht.firebaseapp.com",
+  databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
+  projectId: "mitdht",
+  storageBucket: "mitdht.firebasestorage.app",
+  messagingSenderId: "994832787139",
+  appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
+  measurementId: "G-EWMWECH4BZ"
+};
 
-function fetchStatus() {
-  fetch("/api/status")
-    .then(res => res.json())
-    .then(data => updateUI(data))
-    .catch(err => console.log("Error:", err));
-}
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
-// ========================= UPDATE UI ==========================
-function updateUI(d) {
-
-  // --- SENSOR ---
-  document.getElementById("temp").innerText = d.sensor.temp.toFixed(1);
-  document.getElementById("hum").innerText  = d.sensor.hum.toFixed(1);
-
-  // --- RELAYS ---
-  setButton("r1", d.relay1);
-  setButton("r2", d.relay2);
-  setButton("r3", d.relay3);
-
-  // --- TIMED RELAY ---
-  let now = Date.now();
-  let remaining = d.timed.end - now;
-
-  document.getElementById("countdown").innerText =
-    remaining > 0 ? remaining : 0;
-}
-
-function setButton(id, state) {
-  let b = document.getElementById(id);
-  if (state == 0) {
-    b.className = "on";
-    b.innerText = b.id.toUpperCase() + " ON";
+// ---------- helper for collapsing cards ----------
+function toggleCard(id){
+  const el = document.getElementById(id);
+  if(el.classList.contains('open')){
+    el.style.maxHeight = '0px'; el.classList.remove('open');
   } else {
-    b.className = "off";
-    b.innerText = b.id.toUpperCase() + " OFF";
+    el.style.maxHeight = el.scrollHeight + 'px'; el.classList.add('open');
   }
 }
-</script>
+window.toggleCard = toggleCard;
 
+// ---------- relay state cache ----------
+const relayState = {1:0,2:0,3:0};
+
+// ---------- attach listeners ----------
+// Relays
+onValue(ref(db, 'device1/relay1'), snap => { const v = snap.exists()?snap.val():0; relayState[1]=v; updateRelayBtn(1,v); });
+onValue(ref(db, 'device1/relay2'), snap => { const v = snap.exists()?snap.val():0; relayState[2]=v; updateRelayBtn(2,v); });
+onValue(ref(db, 'device1/relay3'), snap => { const v = snap.exists()?snap.val():0; relayState[3]=v; updateRelayBtn(3,v); });
+
+// Sensor
+onValue(ref(db, 'device1/sensor/temp'), snap => {
+  const v = snap.exists()?snap.val():null;
+  document.getElementById('temp').innerText = v===null?'--':Number(v).toFixed(2);
+});
+onValue(ref(db, 'device1/sensor/hum'), snap => {
+  const v = snap.exists()?snap.val():null;
+  document.getElementById('hum').innerText = v===null?'--':Number(v).toFixed(2);
+});
+onValue(ref(db, 'device1/sensor/lastUpdate'), snap => {
+  const v = snap.exists()?snap.val():null;
+  document.getElementById('last').innerText = v?v:'--';
+});
+
+// Timed object
+let timed = { duration_ms:0, end:0, state:0 };
+onValue(ref(db, 'device1/timed'), snap => {
+  timed = snap.exists() ? snap.val() : {duration_ms:0,end:0,state:0};
+  // update UI state
+  updateTimerUI();
+});
+
+// ---------- functions ----------
+
+function updateRelayBtn(n, state){
+  const btn = document.getElementById('b'+n);
+  if(state === 1){
+    btn.classList.remove('off'); btn.classList.add('on'); btn.innerText = 'Relay'+n+' ON';
+  } else {
+    btn.classList.remove('on'); btn.classList.add('off'); btn.innerText = 'Relay'+n+' OFF';
+  }
+}
+
+async function toggleRelay(n){
+  // invert cached value (safe because we have listener)
+  const cur = (relayState[n] === 1) ? 1 : 0;
+  const next = cur === 1 ? 0 : 1;
+  await set(ref(db, `device1/relay${n}`), next);
+  // UI will update from listener
+}
+window.toggleRelay = toggleRelay;
+
+async function startTimer(){
+  let ms = parseInt(document.getElementById('ms').value);
+  if(!ms || ms <= 0){ alert('Enter milliseconds > 0'); return; }
+  const command = { duration_ms: ms, end: Date.now() + ms, state: 1 };
+  // write timed object — ESP should listen for this and start the hardware timer
+  await set(ref(db, 'device1/timed'), command);
+  // set UI immediately
+  timed = command;
+  updateTimerUI();
+}
+window.startTimer = startTimer;
+
+function updateTimerUI(){
+  const bt = document.getElementById('bt');
+  const info = document.getElementById('info');
+  const bar = document.getElementById('bar');
+
+  if(timed && (timed.state === 1 || timed.state === true)){
+    bt.classList.remove('off'); bt.classList.add('running'); bt.innerText = 'RUNNING...';
+    const remaining = Math.max(0, timed.end - Date.now());
+    info.innerText = 'Auto-off in ' + Math.round(remaining) + ' ms';
+    const dur = timed.duration_ms || 0;
+    let pct = dur > 0 ? ((dur - remaining) / dur) * 100 : 0;
+    pct = Math.min(100, Math.max(0, pct));
+    bar.style.width = pct + '%';
+  } else {
+    bt.classList.remove('running'); bt.classList.add('off'); bt.innerText = 'Start';
+    info.innerText = '';
+    bar.style.width = '0%';
+  }
+}
+
+// smooth animation loop to keep progress smooth
+function animate(){
+  if(timed && timed.state === 1 && timed.duration_ms > 0){
+    const remaining = Math.max(0, timed.end - Date.now());
+    const dur = timed.duration_ms;
+    let pct = dur > 0 ? ((dur - remaining) / dur) * 100 : 0;
+    pct = Math.min(100, Math.max(0, pct));
+    document.getElementById('bar').style.width = pct + '%';
+    document.getElementById('info').innerText = 'Auto-off in ' + Math.round(remaining) + ' ms';
+  }
+  requestAnimationFrame(animate);
+}
+requestAnimationFrame(animate);
+
+</script>
 </body>
 </html>
