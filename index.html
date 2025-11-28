@@ -1,220 +1,183 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ESP32 Control Panel</title>
+  <title>ESP32 Smart Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-<style>
+  <style>
     body {
-        font-family: Arial, sans-serif;
-        background: #f2f4f7;
-        padding: 20px;
-        text-align: center;
+      background: #f2f2f2;
+      font-family: Arial;
+      text-align: center;
+      padding: 20px;
     }
-
-    .header {
-        font-size: 26px;
-        font-weight: bold;
-        margin-bottom: 20px;
-    }
+    h2 { margin-top: 10px; }
 
     .card {
-        width: 90%;
-        max-width: 400px;
-        margin: 15px auto;
-        background: #fff;
-        padding: 20px;
-        border-radius: 16px;
-        box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-        text-align: left;
-    }
-
-    .title {
-        font-size: 20px;
-        margin-bottom: 10px;
-        font-weight: bold;
+      background: white;
+      padding: 20px;
+      margin: 15px;
+      border-radius: 15px;
+      box-shadow: 0 0 10px #ccc;
     }
 
     button {
-        padding: 10px 18px;
-        font-size: 18px;
-        border-radius: 8px;
-        border: none;
-        cursor: pointer;
-        margin: 5px;
+      width: 120px;
+      padding: 12px;
+      margin: 8px;
+      border-radius: 10px;
+      border: none;
+      font-size: 18px;
+      color: white;
+      cursor: pointer;
     }
+    .on  { background: #28a745; }
+    .off { background: #dc3545; }
 
-    .on { background: #27ae60; color: #fff; }
-    .off { background: #e74c3c; color: #fff; }
-
-    .progress-container {
-        width: 100%;
-        background: #ddd;
-        height: 14px;
-        border-radius: 10px;
-        margin-top: 10px;
-        overflow: hidden;
+    .progress {
+      width: 90%;
+      height: 22px;
+      background: #ddd;
+      border-radius: 10px;
+      overflow: hidden;
+      margin: 10px auto;
     }
 
     .progress-bar {
-        width: 0%;
-        height: 100%;
-        background: #3498db;
-        transition: width 0.25s linear;
+      height: 100%;
+      width: 0%;
+      background: #007bff;
+      transition: width 0.2s linear;
+    }
+  </style>
+
+  <!-- Firebase -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-app.js";
+    import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/11.0.1/firebase-database.js";
+
+    // ================================
+    // 🔥 YOUR FIREBASE CONFIG
+    // ================================
+    const firebaseConfig = {
+      apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
+      authDomain: "mitdht.firebaseapp.com",
+      databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
+      projectId: "mitdht",
+      storageBucket: "mitdht.firebasestorage.app",
+      messagingSenderId: "994832787139",
+      appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
+      measurementId: "G-EWMWECH4BZ"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+
+    // =====================
+    // 🔥 SENSOR LISTENERS
+    // =====================
+
+    // Temperature
+    onValue(ref(db, "sensor/temperature"), (snap) => {
+      document.getElementById("temp").innerText = snap.val() + "°C";
+    });
+
+    // Humidity
+    onValue(ref(db, "sensor/humidity"), (snap) => {
+      document.getElementById("humi").innerText = snap.val() + "%";
+    });
+
+    // =====================
+    // 🔥 RELAY LISTENERS
+    // =====================
+    function bindRelay(id, firebasePath) {
+      const button = document.getElementById(id);
+
+      onValue(ref(db, firebasePath), (snap) => {
+        const val = snap.val();
+        button.innerText = val === 1 ? "ON" : "OFF";
+        button.className = val === 1 ? "on" : "off";
+      });
+
+      button.onclick = () => {
+        const newVal = button.innerText === "ON" ? 0 : 1;
+        set(ref(db, firebasePath), newVal);
+      };
     }
 
-    .sensor-value {
-        font-size: 22px;
-        font-weight: bold;
-        margin-top: 8px;
+    bindRelay("btn1", "relay/R1");
+    bindRelay("btn2", "relay/R2");
+    bindRelay("btn3", "relay/R3");
+
+    // =====================
+    // 🔥 TIMER
+    // =====================
+    const progressBar = document.getElementById("progressBar");
+    const timerText = document.getElementById("timerText");
+
+    let totalTime = 0;
+    let remaining = 0;
+
+    // Full set time  
+    onValue(ref(db, "timer/setTime"), (snap) => {
+      totalTime = snap.val();
+    });
+
+    // Remaining countdown  
+    onValue(ref(db, "timer/remaining"), (snap) => {
+      remaining = snap.val();
+      timerText.innerText = remaining + " sec";
+
+      if (totalTime > 0) {
+        let percent = (remaining / totalTime) * 100;
+        progressBar.style.width = percent + "%";
+      }
+    });
+
+    // Start Timer Button
+    function startTimer() {
+      const sec = Number(prompt("Enter seconds:"));
+      if (sec > 0) {
+        set(ref(db, "timer/setTime"), sec);
+        set(ref(db, "timer/remaining"), sec);
+      }
     }
-</style>
+    window.startTimer = startTimer;
+
+  </script>
 </head>
 
 <body>
 
-<div class="header">ESP32 Global Control Panel</div>
+  <h2>ESP32 Smart Control</h2>
 
-<!-- Relay Cards -->
-<div class="card">
-    <div class="title">Relay 1</div>
-    <button id="r1" class="off">OFF</button>
-</div>
+  <!-- SENSOR CARD -->
+  <div class="card">
+    <h3>Temperature & Humidity</h3>
+    <p><b>Temperature:</b> <span id="temp">--</span></p>
+    <p><b>Humidity:</b> <span id="humi">--</span></p>
+  </div>
 
-<div class="card">
-    <div class="title">Relay 2</div>
-    <button id="r2" class="off">OFF</button>
-</div>
+  <!-- RELAY CARD -->
+  <div class="card">
+    <h3>Relays</h3>
+    <button id="btn1" class="off">OFF</button>
+    <button id="btn2" class="off">OFF</button>
+    <button id="btn3" class="off">OFF</button>
+  </div>
 
-<div class="card">
-    <div class="title">Relay 3</div>
-    <button id="r3" class="off">OFF</button>
-</div>
+  <!-- TIMER CARD -->
+  <div class="card">
+    <h3>Timer Relay</h3>
 
-<!-- Timer Relay -->
-<div class="card">
-    <div class="title">Timed Relay</div>
-    <button id="timerBtn" class="off">START</button>
-
-    <div class="progress-container">
-        <div class="progress-bar" id="progress"></div>
+    <div class="progress">
+      <div class="progress-bar" id="progressBar"></div>
     </div>
 
-    <div id="remainingText" style="margin-top:10px; font-weight:bold;">0 sec</div>
-</div>
+    <p><b>Remaining:</b> <span id="timerText">0 sec</span></p>
 
-<!-- Sensor -->
-<div class="card">
-    <div class="title">SHT20 Sensor</div>
-    <div class="sensor-value">🌡 Temp: <span id="temp">--</span> °C</div>
-    <div class="sensor-value">💧 Humidity: <span id="hum">--</span> %</div>
-</div>
-
-<!-- Firebase SDK + JS (External module mode allowed by Netlify) -->
-<script type="module">
-
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
-
-/* --- FIREBASE CONFIG --- */
-const firebaseConfig = {
-  apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
-  authDomain: "mitdht.firebaseapp.com",
-  databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
-  projectId: "mitdht",
-  storageBucket: "mitdht.firebasestorage.app",
-  messagingSenderId: "994832787139",
-  appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
-  measurementId: "G-EWMWECH4BZ"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getDatabase();
-
-/* -------------------------------
-   Helper function to update relay UI
--------------------------------- */
-function toggleButton(btn, state) {
-    if (state == 1) {
-        btn.classList.remove("off");
-        btn.classList.add("on");
-        btn.innerText = "ON";
-    } else {
-        btn.classList.remove("on");
-        btn.classList.add("off");
-        btn.innerText = "OFF";
-    }
-}
-
-/* -------------------------------
-   Relay Logic
--------------------------------- */
-function setupRelay(id, path) {
-    const btn = document.getElementById(id);
-
-    onValue(ref(db, path), (snap) => {
-        const v = snap.val();
-        toggleButton(btn, v);
-    });
-
-    btn.onclick = () => {
-        const newState = btn.classList.contains("off") ? 1 : 0;
-        set(ref(db, path), newState);
-    };
-}
-
-setupRelay("r1", "relay1");
-setupRelay("r2", "relay2");
-setupRelay("r3", "relay3");
-
-/* -------------------------------
-   Timer Relay Logic
--------------------------------- */
-const timerBtn = document.getElementById("timerBtn");
-const progress = document.getElementById("progress");
-const remainingText = document.getElementById("remainingText");
-
-let totalDuration = 1;
-let remainingTime = 0;
-
-onValue(ref(db, "timer/duration"), snap => {
-    totalDuration = snap.val();
-});
-
-onValue(ref(db, "timer/remaining"), snap => {
-    remainingTime = snap.val();
-    remainingText.innerHTML = remainingTime + " sec";
-    let pct = (remainingTime / totalDuration) * 100;
-    progress.style.width = pct + "%";
-});
-
-onValue(ref(db, "timer/enabled"), snap => {
-    const active = snap.val();
-    toggleButton(timerBtn, active);
-    timerBtn.innerText = active ? "RUNNING" : "START";
-});
-
-timerBtn.onclick = () => {
-    if (timerBtn.classList.contains("off")) {
-        set(ref(db, "timer/enabled"), 1);
-    } else {
-        set(ref(db, "timer/enabled"), 0);
-    }
-};
-
-/* -------------------------------
-   Sensor Data
--------------------------------- */
-onValue(ref(db, "sensor/temp"), snap => {
-    document.getElementById("temp").innerText = snap.val();
-});
-
-onValue(ref(db, "sensor/hum"), snap => {
-    document.getElementById("hum").innerText = snap.val();
-});
-
-</script>
+    <button onclick="startTimer()" style="background:#17a2b8">Set Timer</button>
+  </div>
 
 </body>
 </html>
