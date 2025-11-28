@@ -1,23 +1,21 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>ESP32 Global Controller</title>
+  <title>ESP32 Control Panel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
   <style>
     body { font-family: Arial; text-align: center; padding: 20px; }
-    button { padding: 12px 25px; margin: 10px; font-size: 18px; border: none; border-radius: 6px; cursor: pointer; }
+    button {
+      padding: 12px 25px; margin: 10px; font-size: 18px;
+      border: none; border-radius: 6px; cursor: pointer;
+    }
     .on  { background: #4CAF50; color: white; }
     .off { background: #f44336; color: white; }
     .timed { background: #2196F3; color: white; }
     .card {
-      padding: 20px;
-      margin: 15px auto;
-      width: 90%;
-      max-width: 500px;
-      border-radius: 10px;
-      background: #f5f5f5;
-      box-shadow: 0 0 6px rgba(0,0,0,0.2);
+      padding: 20px; margin: 15px auto; width: 90%; max-width: 500px;
+      border-radius: 10px; background: #f5f5f5; box-shadow: 0 0 6px rgba(0,0,0,0.2);
     }
   </style>
 </head>
@@ -41,80 +39,53 @@
 
 <div class="card">
   <h2>Timed Relay ⏱️</h2>
-
   <label><b>Duration (ms)</b></label><br>
-  <input type="number" id="delayInput" value="5000" 
-         style="padding:10px; font-size:18px; width:150px; margin:10px;">
-  <br>
-
+  <input type="number" id="delayInput" value="5000" style="padding:10px; font-size:18px; width:150px; margin:10px;"><br>
   <button class="timed" onclick="startTimed()">RUN TIMED RELAY</button>
-
   <p><b>Remaining:</b> <span id="countdown">0</span> ms</p>
 </div>
 
-<!-- ===================== FIREBASE =========================== -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+<script>
+const ESP32 = "http://192.168.1.30";  // <<<<<< CHANGE THIS TO YOUR ESP32 IP
 
-const firebaseConfig = {
-  apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
-  authDomain: "mitdht.firebaseapp.com",
-  databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
-  projectId: "mitdht",
-  storageBucket: "mitdht.firebasestorage.app",
-  messagingSenderId: "994832787139",
-  appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
-  measurementId: "G-EWMWECH4BZ"
-};
+function toggleRelay(num) {
+  fetch(`${ESP32}/api/toggle?relay=${num}`);
+}
 
-const app = initializeApp(firebaseConfig);
-const db  = getDatabase(app);
+function startTimed() {
+  let ms = document.getElementById("delayInput").value;
+  fetch(`${ESP32}/api/setTimed?duration=${ms}`);
+}
 
-// =============== READ LIVE SENSOR DATA ===============
-onValue(ref(db, "device1/sensor"), snap => {
-  let d = snap.val();
-  document.getElementById("temp").innerText = d.temp.toFixed(1);
-  document.getElementById("hum").innerText  = d.hum.toFixed(1);
-});
+setInterval(fetchStatus, 1000);
 
-// =============== READ LIVE RELAY STATUS ===============
-onValue(ref(db, "device1"), snap => {
-  let d = snap.val();
+function fetchStatus() {
+  fetch(`${ESP32}/api/status`)
+    .then(res => res.json())
+    .then(data => updateUI(data))
+    .catch(err => console.log("Error:", err));
+}
+
+function updateUI(d) {
+  document.getElementById("temp").innerText = d.sensor.temp.toFixed(1);
+  document.getElementById("hum").innerText  = d.sensor.hum.toFixed(1);
+
   setButton("r1", d.relay1);
   setButton("r2", d.relay2);
   setButton("r3", d.relay3);
 
-  // timer countdown
-  let remain = d.timed.end - Date.now();
-  document.getElementById("countdown").innerText = remain > 0 ? remain : 0;
-});
-
-// ======================= BUTTONS ======================
-function toggleRelay(n) {
-  let path = "device1/relay" + n;
-  update(ref(db, "device1"), { ["relay"+n]: null }); // small hack to force event
-  set(ref(db, path), 1);  // ESP inverts active-low
+  let remaining = d.timed.end - Date.now();
+  document.getElementById("countdown").innerText = remaining > 0 ? remaining : 0;
 }
 
-function startTimed() {
-  let ms = parseInt(document.getElementById("delayInput").value);
-  update(ref(db, "device1/timed"), {
-    duration_ms: ms,
-    state: 1,
-    end: Date.now() + ms
-  });
-}
-
-// ======================= UI HELPER ====================
 function setButton(id, state) {
   let b = document.getElementById(id);
-  if (state === 0) {
+  if (state == 0) {
     b.className = "on";
-    b.innerText = b.id.toUpperCase() + " ON";
+    b.innerText = id.toUpperCase() + " ON";
   } else {
     b.className = "off";
-    b.innerText = b.id.toUpperCase() + " OFF";
+    b.innerText = id.toUpperCase() + " OFF";
   }
 }
 </script>
