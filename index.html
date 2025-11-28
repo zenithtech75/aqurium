@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ESP32 Cloud Panel</title>
+  <title>ESP32 Cloud Control Panel</title>
   <link rel="stylesheet" href="styles.css" />
   <script type="module" src="script.js" defer></script>
 </head>
 <body>
-  <h1>ESP32 Control Panel (Online)</h1>
+  <h1>ESP32 Online Control Panel</h1>
 
   <div class="card">
     <h2>Relays</h2>
@@ -19,7 +19,7 @@
 
   <div class="card">
     <h2>Timed Relay</h2>
-    <button class="btn" id="relay4">Relay 4 Timer</button>
+    <button class="btn" id="relay4">Start 30s Timer</button>
 
     <div id="timerBox">
       <div id="timerProgress"></div>
@@ -30,8 +30,9 @@
 
   <div class="card">
     <h2>Sensor Values</h2>
-    <p>Temperature: <span id="temp">--</span>°C</p>
-    <p>Humidity: <span id="humi">--</span>%</p>
+    <p>Temperature: <span id="temp">--</span> °C</p>
+    <p>Humidity: <span id="humi">--</span> %</p>
   </div>
+
 </body>
 </html>
