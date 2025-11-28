@@ -1,199 +1,182 @@
 <!doctype html>
 <html>
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>ESP32 Cloud UI (device1)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 Relays + SHT20 (Cloud)</title>
 <style>
   body{font-family:Arial;margin:12px;background:#f6f7fb}
-  h2{margin-top:6px;text-align:center}
-  .card{border:1px solid #ddd;border-radius:12px;margin:12px auto;overflow:hidden;box-shadow:0 2px 6px rgba(0,0,0,0.06);background:#fff;max-width:720px;padding:12px}
-  .card-header{display:flex;justify-content:space-between;align-items:center;cursor:pointer;padding:8px 4px}
-  .row{display:flex;gap:8px;flex-wrap:wrap}
+  h2{margin-top:6px}
   .relayBtn{width:140px;padding:10px;border:none;color:#fff;border-radius:8px;margin:6px;font-size:16px;cursor:pointer}
-  .on{background:#2e7d32}
-  .off{background:#c62828}
-  .running{background:#fb8c00}
+  .on{background:#2e7d32}.off{background:#c62828}.running{background:#fb8c00}
   .progress{width:100%;height:18px;border-radius:9px;background:#ddd;overflow:hidden;margin-top:8px}
-  .bar{height:100%;width:0%;background:#2e7d32;transition:width 0.08s linear}
+  .bar{height:100%;width:0%;background:#2e7d32}
   label{font-weight:bold}
-  input[type=number]{padding:8px;border-radius:6px;border:1px solid #ccc;width:150px}
-  .small{font-size:13px;color:#666;margin-top:6px}
-  .center{max-width:720px;margin:6px auto;text-align:center}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .card{border:1px solid #ddd;border-radius:12px;margin:12px 0;overflow:hidden;box-shadow:0 2px 5px rgba(0,0,0,0.08);background:#fff}
+  .card-header{padding:14px;background:#fafafa;font-size:18px;font-weight:600;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+  .card-content{max-height:0;overflow:hidden;transition:max-height 0.35s ease;padding:0 14px}
+  .card-content.open{padding:14px}
+  .small{font-size:13px;color:#666}
+  .container{max-width:720px;margin:0 auto}
+  input[type=number]{padding:8px;border-radius:6px;border:1px solid #ccc}
 </style>
 </head>
 <body>
+<div class="container">
+  <h2>ESP32 Web Control (Cloud)</h2>
 
-<h2>ESP32 Web Control (device1)</h2>
-
-<div class="card">
-  <div class="card-header" onclick="toggleCard('c1')">
-    <div>🔧 Manual Relays</div><div>click to expand</div>
-  </div>
-  <div class="card-content" id="c1" style="max-height:220px;">
-    <div class="row" style="padding:8px 4px">
-      <button id="b1" class="relayBtn off" onclick="toggleRelay(1)">Relay1 OFF</button>
-      <button id="b2" class="relayBtn off" onclick="toggleRelay(2)">Relay2 OFF</button>
-      <button id="b3" class="relayBtn off" onclick="toggleRelay(3)">Relay3 OFF</button>
+  <!-- CARD 1 : MANUAL RELAYS -->
+  <div class="card">
+    <div class="card-header" onclick="toggleCard('c1')">
+      Manual Relays
+      <span>🔧</span>
     </div>
-    <div class="small" style="padding:0 8px">Buttons write to <code>device1/relay1..3</code> in Firebase.</div>
+    <div class="card-content" id="c1">
+      <div class="row">
+        <button id="b1" class="relayBtn off" onclick="toggleRelay(1)">Relay1 OFF</button>
+        <button id="b2" class="relayBtn off" onclick="toggleRelay(2)">Relay2 OFF</button>
+        <button id="b3" class="relayBtn off" onclick="toggleRelay(3)">Relay3 OFF</button>
+      </div>
+      <div class="small">Buttons write to <code>device1/relay1</code> etc. ESP polls Firebase and applies.</div>
+    </div>
   </div>
+
+  <!-- CARD 2 : TIMED RELAY -->
+  <div class="card">
+    <div class="card-header" onclick="toggleCard('c2')">
+      Timed Relay
+      <span>⏱️</span>
+    </div>
+    <div class="card-content" id="c2">
+      <label>Duration (ms)</label>
+      <input id="ms" type="number" value="5000" style="width:140px;padding:8px;font-size:15px">
+      <button id="bt" class="relayBtn off" onclick="startTimed()">Start</button>
+      <div id="info" style="margin-top:8px;font-weight:bold;"></div>
+      <div class="progress"><div id="bar" class="bar"></div></div>
+      <div class="small" style="margin-top:8px">Starting writes <code>device1/timed = {state:1, duration_ms:...}</code> — ESP will compute end & run locally.</div>
+    </div>
+  </div>
+
+  <!-- CARD 3 : SENSOR -->
+  <div class="card">
+    <div class="card-header" onclick="toggleCard('c3')">
+      Sensor Readings
+      <span>🌡️</span>
+    </div>
+    <div class="card-content" id="c3">
+      <p>Temperature: <span id="temp">--</span> °C</p>
+      <p>Humidity: <span id="hum">--</span> %</p>
+      <p>Last update: <span id="last">--</span></p>
+    </div>
+  </div>
+
+  <div style="text-align:center;margin-top:8px;color:#666;font-size:13px">Hosted via Firebase — accessible from any network</div>
 </div>
 
-<div class="card">
-  <div class="card-header" onclick="toggleCard('c2')">
-    <div>⏱ Timed Relay</div><div>start/stop via Firebase command</div>
-  </div>
-  <div class="card-content" id="c2" style="max-height:240px;padding:12px;">
-    <label>Duration (ms)</label><br>
-    <input id="ms" type="number" value="5000" min="1"><br><br>
-    <button id="bt" class="relayBtn off" onclick="startTimer()">Start</button>
-    <div id="info" style="margin-top:8px;font-weight:bold"></div>
-    <div class="progress"><div id="bar" class="bar"></div></div>
-    <div class="small" style="margin-top:8px">Website writes the object to <code>device1/timed</code>. ESP must listen and start timer.</div>
-  </div>
-</div>
-
-<div class="card">
-  <div class="card-header" onclick="toggleCard('c3')">
-    <div>🌡 Sensor Readings</div><div>live from Firebase</div>
-  </div>
-  <div class="card-content" id="c3" style="max-height:200px;padding:12px;">
-    <p>Temperature: <strong><span id="temp">--</span> °C</strong></p>
-    <p>Humidity: <strong><span id="hum">--</span> %</strong></p>
-    <p>Last update: <strong><span id="last">--</span></strong></p>
-  </div>
-</div>
-
-<div class="center small">Firebase DB: <code>mitdht-default-rtdb</code> — paths under <code>device1/</code></div>
-
+<!-- Firebase module -->
 <script type="module">
-// ---------- Firebase imports ----------
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import { getDatabase, ref, set, onValue, get } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+  import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-// ---------- Your Firebase config ----------
-const firebaseConfig = {
-  apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
-  authDomain: "mitdht.firebaseapp.com",
-  databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
-  projectId: "mitdht",
-  storageBucket: "mitdht.firebasestorage.app",
-  messagingSenderId: "994832787139",
-  appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
-  measurementId: "G-EWMWECH4BZ"
-};
+  // --- Your Firebase config (as you provided) ---
+  const firebaseConfig = {
+    apiKey: "AIzaSyC7du6Zwd0y6-DQQoiDdopCqKtWqUBbaT8",
+    authDomain: "mitdht.firebaseapp.com",
+    databaseURL: "https://mitdht-default-rtdb.firebaseio.com",
+    projectId: "mitdht",
+    storageBucket: "mitdht.firebasestorage.app",
+    messagingSenderId: "994832787139",
+    appId: "1:994832787139:web:f0f6f2ea177b1476af2476",
+    measurementId: "G-EWMWECH4BZ"
+  };
 
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase();
 
-// ---------- helper for collapsing cards ----------
-function toggleCard(id){
-  const el = document.getElementById(id);
-  if(el.classList.contains('open')){
-    el.style.maxHeight = '0px'; el.classList.remove('open');
-  } else {
-    el.style.maxHeight = el.scrollHeight + 'px'; el.classList.add('open');
+  // helper to toggle card
+  function toggleCard(id){
+    const c = document.getElementById(id);
+    if(c.classList.contains('open')){
+      c.style.maxHeight = '0px';
+      c.classList.remove('open');
+    } else {
+      c.style.maxHeight = c.scrollHeight + 'px';
+      c.classList.add('open');
+    }
   }
-}
-window.toggleCard = toggleCard;
+  window.toggleCard = toggleCard;
 
-// ---------- relay state cache ----------
-const relayState = {1:0,2:0,3:0};
-
-// ---------- attach listeners ----------
-// Relays
-onValue(ref(db, 'device1/relay1'), snap => { const v = snap.exists()?snap.val():0; relayState[1]=v; updateRelayBtn(1,v); });
-onValue(ref(db, 'device1/relay2'), snap => { const v = snap.exists()?snap.val():0; relayState[2]=v; updateRelayBtn(2,v); });
-onValue(ref(db, 'device1/relay3'), snap => { const v = snap.exists()?snap.val():0; relayState[3]=v; updateRelayBtn(3,v); });
-
-// Sensor
-onValue(ref(db, 'device1/sensor/temp'), snap => {
-  const v = snap.exists()?snap.val():null;
-  document.getElementById('temp').innerText = v===null?'--':Number(v).toFixed(2);
-});
-onValue(ref(db, 'device1/sensor/hum'), snap => {
-  const v = snap.exists()?snap.val():null;
-  document.getElementById('hum').innerText = v===null?'--':Number(v).toFixed(2);
-});
-onValue(ref(db, 'device1/sensor/lastUpdate'), snap => {
-  const v = snap.exists()?snap.val():null;
-  document.getElementById('last').innerText = v?v:'--';
-});
-
-// Timed object
-let timed = { duration_ms:0, end:0, state:0 };
-onValue(ref(db, 'device1/timed'), snap => {
-  timed = snap.exists() ? snap.val() : {duration_ms:0,end:0,state:0};
-  // update UI state
-  updateTimerUI();
-});
-
-// ---------- functions ----------
-
-function updateRelayBtn(n, state){
-  const btn = document.getElementById('b'+n);
-  if(state === 1){
-    btn.classList.remove('off'); btn.classList.add('on'); btn.innerText = 'Relay'+n+' ON';
-  } else {
-    btn.classList.remove('on'); btn.classList.add('off'); btn.innerText = 'Relay'+n+' OFF';
+  // --- Relay listeners & toggles (device1/relay1 etc) ---
+  function listenRelay(n, btnId){
+    onValue(ref(db, `device1/relay${n}`), snap => {
+      const v = snap.exists() ? snap.val() : 0;
+      const btn = document.getElementById(btnId);
+      if(v == 1){ btn.className='relayBtn on'; btn.innerText=`Relay${n} ON`; }
+      else { btn.className='relayBtn off'; btn.innerText=`Relay${n} OFF`; }
+    });
   }
-}
+  listenRelay(1,'b1'); listenRelay(2,'b2'); listenRelay(3,'b3');
 
-async function toggleRelay(n){
-  // invert cached value (safe because we have listener)
-  const cur = (relayState[n] === 1) ? 1 : 0;
-  const next = cur === 1 ? 0 : 1;
-  await set(ref(db, `device1/relay${n}`), next);
-  // UI will update from listener
-}
-window.toggleRelay = toggleRelay;
-
-async function startTimer(){
-  let ms = parseInt(document.getElementById('ms').value);
-  if(!ms || ms <= 0){ alert('Enter milliseconds > 0'); return; }
-  const command = { duration_ms: ms, end: Date.now() + ms, state: 1 };
-  // write timed object — ESP should listen for this and start the hardware timer
-  await set(ref(db, 'device1/timed'), command);
-  // set UI immediately
-  timed = command;
-  updateTimerUI();
-}
-window.startTimer = startTimer;
-
-function updateTimerUI(){
-  const bt = document.getElementById('bt');
-  const info = document.getElementById('info');
-  const bar = document.getElementById('bar');
-
-  if(timed && (timed.state === 1 || timed.state === true)){
-    bt.classList.remove('off'); bt.classList.add('running'); bt.innerText = 'RUNNING...';
-    const remaining = Math.max(0, timed.end - Date.now());
-    info.innerText = 'Auto-off in ' + Math.round(remaining) + ' ms';
-    const dur = timed.duration_ms || 0;
-    let pct = dur > 0 ? ((dur - remaining) / dur) * 100 : 0;
-    pct = Math.min(100, Math.max(0, pct));
-    bar.style.width = pct + '%';
-  } else {
-    bt.classList.remove('running'); bt.classList.add('off'); bt.innerText = 'Start';
-    info.innerText = '';
-    bar.style.width = '0%';
+  // Toggle: write 0/1 to device1/relayN
+  async function toggleRelay(n){
+    const path = `device1/relay${n}`;
+    // read current once
+    let cur = 0;
+    await new Promise(res => onValue(ref(db, path), snap => { cur = snap.exists()? snap.val():0; res(); }, { onlyOnce: true }));
+    const newVal = cur === 1 ? 0 : 1;
+    await set(ref(db, path), newVal);
   }
-}
+  window.toggleRelay = toggleRelay;
 
-// smooth animation loop to keep progress smooth
-function animate(){
-  if(timed && timed.state === 1 && timed.duration_ms > 0){
-    const remaining = Math.max(0, timed.end - Date.now());
-    const dur = timed.duration_ms;
-    let pct = dur > 0 ? ((dur - remaining) / dur) * 100 : 0;
-    pct = Math.min(100, Math.max(0, pct));
-    document.getElementById('bar').style.width = pct + '%';
-    document.getElementById('info').innerText = 'Auto-off in ' + Math.round(remaining) + ' ms';
+  // --- Sensor listeners (device1/sensor/temp & hum) ---
+  onValue(ref(db, 'device1/sensor/temp'), snap => {
+    const v = snap.exists() ? snap.val() : null;
+    document.getElementById('temp').innerText = (v === null ? '--' : Number(v).toFixed(2));
+  });
+  onValue(ref(db, 'device1/sensor/hum'), snap => {
+    const v = snap.exists() ? snap.val() : null;
+    document.getElementById('hum').innerText = (v === null ? '--' : Number(v).toFixed(2));
+  });
+  // optionally last update string if you store it: device1/sensor/last
+  onValue(ref(db, 'device1/sensor/last'), snap => {
+    const v = snap.exists() ? snap.val() : null;
+    document.getElementById('last').innerText = v ? v : '--';
+  });
+
+  // --- Timed listener: device1/timed/state,duration_ms,end ---
+  let curDuration = 0;
+  let curEnd = 0;
+  onValue(ref(db, 'device1/timed/duration_ms'), snap => { curDuration = snap.exists()? snap.val():0; });
+  onValue(ref(db, 'device1/timed/end'), snap => { curEnd = snap.exists()? snap.val():0; });
+  onValue(ref(db, 'device1/timed/state'), snap => {
+    const st = snap.exists()? snap.val():0;
+    const bt = document.getElementById('bt');
+    if(st == 1){ bt.className='relayBtn running'; bt.innerText='RUNNING...'; }
+    else { bt.className='relayBtn off'; bt.innerText='Start'; document.getElementById('bar').style.width='0%'; document.getElementById('info').innerText=''; }
+  });
+
+  // smooth update of progress
+  function tickProgress(){
+    if(curDuration > 0 && curEnd > 0){
+      const remaining = Math.max(0, curEnd - Date.now());
+      const used = Math.max(0, curDuration - remaining);
+      const pct = Math.min(100, Math.max(0, (used/curDuration)*100));
+      document.getElementById('bar').style.width = pct + '%';
+      document.getElementById('info').innerText = 'Auto-off in ' + Math.round(remaining) + ' ms';
+    }
+    requestAnimationFrame(tickProgress);
   }
-  requestAnimationFrame(animate);
-}
-requestAnimationFrame(animate);
+  requestAnimationFrame(tickProgress);
+
+  // Start timed: write {state:1, duration_ms:..., end:0} — ESP will compute end and run
+  async function startTimed(){
+    const msVal = parseInt(document.getElementById('ms').value);
+    if(!msVal || msVal <= 0){ alert('Enter milliseconds > 0'); return; }
+    // write timed object with state=1 and duration_ms (ESP will compute end)
+    // Using set/ update on device1/timed
+    await set(ref(db, 'device1/timed'), { state: 1, duration_ms: msVal, end: 0 });
+  }
+  window.startTimed = startTimed;
 
 </script>
 </body>
