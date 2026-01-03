@@ -1,0 +1,438 @@
+/* ESP32 — Full sketch
+   3 Manual Relays + 1 Timed Relay + SHT20 + Local Web UI + Firebase two-way sync
+   Active-LOW relays (LOW = ON, HIGH = OFF)
+   Requires: WiFiManager, ArduinoJson (v6)
+*/
+
+#include <WiFi.h>
+#include <WebServer.h>
+#include <WiFiManager.h>
+#include <Wire.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
+
+// ---------- USER CONFIG ----------
+// DO NOT write "https://"
+const char* FIREBASE_HOST = "aquarium-controller-ba5fa-default-rtdb.firebaseio.com";
+const char* FIREBASE_AUTH = "AIzaSyCbQxyS5PxYsJ_LRAcTQVK26VgDze3C9Qo";
+// ---------------------------------
+
+WebServer server(80);
+WiFiClientSecure fbClient;
+HTTPClient http;
+
+// ---------- Pins ----------
+#define RELAY1_PIN 16
+#define RELAY2_PIN 17
+#define RELAY3_PIN 18
+#define RELAYT_PIN 19   // timed relay
+int servoPin = 4;   // You can use any PWM pin: 2,4,5,12,13,14,15,18,19,21,22,23
+
+
+// I2C SHT20
+#define I2C_SDA 21
+#define I2C_SCL 22
+#define SHT20_ADDR 0x40
+
+// states
+volatile bool relay1State = false;
+volatile bool relay2State = false;
+volatile bool relay3State = false;
+volatile bool relayTimedState = false;
+volatile unsigned long timedRelayEnd = 0;
+volatile unsigned long timedRelayDuration = 0;
+
+const unsigned long FIREBASE_POLL_MS = 2000;
+const unsigned long SENSOR_PUBLISH_MS = 5000;
+
+unsigned long lastFirebasePoll = 0;
+unsigned long lastSensorPublish = 0;
+
+
+// ========================= HTML PAGE =========================
+const char MAIN_page[] PROGMEM = R"rawliteral(
+<!doctype html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aquarium-Controller_SHT20</title>
+<style>
+  body{font-family:Arial;margin:12px}
+  .relayBtn{width:140px;padding:10px;border:none;color:#fff;border-radius:8px;margin:6px;font-size:16px}
+  .on{background:#2e7d32}.off{background:#c62828}.running{background:#fb8c00}
+  .progress{width:100%;height:18px;border-radius:9px;background:#ddd;overflow:hidden;margin-top:8px}
+  .bar{height:100%;width:0%;background:#2e7d32}
+  label{font-weight:bold}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .card{border:1px solid #999;border-radius:12px;margin:12px 0;overflow:hidden;box-shadow:0 2px 5px rgba(0,0,0,0.15)}
+  .card-header{padding:14px;background:#f2f2f2;font-size:18px;font-weight:bold;display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+  .card-content{max-height:0;overflow:hidden;transition:max-height .35s ease;padding:0 14px}
+  .card-content.open{padding:14px}
+</style>
+</head>
+<body>
+
+<h2>Aquarium-Controller_SHT20</h2>
+
+<div class="card">
+  <div class="card-header" onclick="toggleCard('c1')">Manual Relays <span>🔧</span></div>
+  <div class="card-content" id="c1">
+    <div class="row">
+      <button id="b1" class="relayBtn off" onclick="toggle(1)">Relay1 OFF</button>
+      <button id="b2" class="relayBtn off" onclick="toggle(2)">Relay2 OFF</button>
+      <button id="b3" class="relayBtn off" onclick="toggle(3)">Relay3 OFF</button>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="toggleCard('c2')">Timed Relay <span>⏱️</span></div>
+  <div class="card-content" id="c2">
+    <label>Duration (ms)</label>
+    <input id="ms" type="number" placeholder="5000" style="width:140px;padding:8px;font-size:15px">
+    <button id="bt" class="relayBtn off" onclick="startTimed()">Start</button>
+    <div id="info" style="margin-top:8px;font-weight:bold;"></div>
+    <div class="progress"><div id="bar" class="bar"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header" onclick="toggleCard('c3')">Sensor Readings <span>🌡️</span></div>
+  <div class="card-content" id="c3">
+    <p>Temperature: <span id="temp">--</span> °C</p>
+    <p>Humidity: <span id="hum">--</span> %</p>
+    <p>Last update: <span id="last">--</span></p>
+  </div>
+</div>
+
+<script>
+function toggleCard(id){
+  let c=document.getElementById(id);
+  if(c.classList.contains("open")){c.style.maxHeight="0";c.classList.remove("open")}
+  else{c.style.maxHeight=c.scrollHeight+"px";c.classList.add("open")}
+}
+
+let firstLoad=true;
+setInterval(fetchStatus,1000);
+
+function fetchStatus(){
+  fetch('/status').then(r=>r.json()).then(j=>{
+    setBtn(1,j.r1); setBtn(2,j.r2); setBtn(3,j.r3);
+    setTimed(j.rt,j.rt_remaining,j.rt_duration);
+    if(j.temp!==undefined){
+      document.getElementById('temp').innerText=j.temp.toFixed(2);
+      document.getElementById('hum').innerText=j.hum.toFixed(2);
+      document.getElementById('last').innerText=j.last;
+      if(firstLoad){toggleCard('c3');firstLoad=false;}
+    }
+  });
+}
+
+function setBtn(n,s){
+  let b=document.getElementById("b"+n);
+  if(s){b.className="relayBtn on";b.innerText="Relay"+n+" ON";}
+  else{b.className="relayBtn off";b.innerText="Relay"+n+" OFF";}
+}
+
+function toggle(n){
+  fetch('/relay'+n+'/toggle');
+}
+
+function startTimed(){
+  let ms=parseInt(document.getElementById('ms').value);
+  if(!ms||ms<=0){alert("Enter ms > 0");return;}
+  fetch('/timed/on?ms='+ms);
+}
+
+function setTimed(rt,remaining,duration){
+  let bt=document.getElementById('bt');
+  let info=document.getElementById('info');
+  let bar=document.getElementById('bar');
+  if(rt){
+    bt.className='relayBtn running';bt.innerText='RUNNING...';
+    info.innerText='Auto-off in '+Math.max(0,Math.round(remaining))+' ms';
+    let pct=(duration-remaining)/duration*100;
+    bar.style.width=Math.min(100,Math.max(0,pct))+'%';
+  }else{
+    bt.className='relayBtn off';bt.innerText='Start';
+    info.innerText='';bar.style.width='0%';
+  }
+}
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+
+// ========================= Firebase Helpers =========================
+
+// FINAL FIXED URL GENERATOR (NO FIREBASE_PATH)
+String firebaseURL() {
+    String url = "https://";
+    url += FIREBASE_HOST;
+    url += "/device.json";   // your fixed device node
+    if (strlen(FIREBASE_AUTH) > 0) {
+        url += "?auth=";
+        url += FIREBASE_AUTH;
+    }
+    return url;
+}
+
+bool firebaseGet(JsonDocument &doc){
+    String url = firebaseURL();
+    fbClient.setInsecure();
+    http.begin(fbClient, url);
+    int code = http.GET();
+    if(code != 200){ http.end(); return false; }
+    String payload = http.getString();
+    http.end();
+    return deserializeJson(doc, payload) == DeserializationError::Ok;
+}
+
+bool firebasePatch(const String &json){
+    String url = firebaseURL();
+    fbClient.setInsecure();
+    http.begin(fbClient, url);
+    http.addHeader("Content-Type", "application/json");
+    int code = http.sendRequest("PATCH", (uint8_t*)json.c_str(), json.length());
+    http.end();
+    return (code == 200 || code == 204);
+}
+
+
+// ========================= SHT20 SENSOR =========================
+bool readSHT20(float &t, float &h){
+    Wire.beginTransmission(SHT20_ADDR); Wire.write(0xF3);
+    if(Wire.endTransmission()!=0)return false;
+    delay(85);
+    Wire.requestFrom(SHT20_ADDR,3);
+    if(Wire.available()<3)return false;
+    uint16_t tr=((uint16_t)Wire.read()<<8)|Wire.read(); Wire.read();
+
+    Wire.beginTransmission(SHT20_ADDR); Wire.write(0xF5);
+    if(Wire.endTransmission()!=0)return false;
+    delay(29);
+    Wire.requestFrom(SHT20_ADDR,3);
+    if(Wire.available()<3)return false;
+    uint16_t hr=((uint16_t)Wire.read()<<8)|Wire.read(); Wire.read();
+
+    t=-46.85+175.72*(tr/65536.0);
+    h=-6+125*(hr/65536.0);
+    if(h<0)h=0; if(h>100)h=100;
+    return true;
+}
+
+
+// ========================= Utility =========================
+String formatTime(unsigned long ms){
+    unsigned long s=ms/1000;
+    int hh=s/3600,mm=(s%3600)/60,ss=s%60;
+    char b[20]; sprintf(b,"%02d:%02d:%02d",hh,mm,ss);
+    return String(b);
+}
+
+
+// ========================= Web API =========================
+void handleRoot(){ server.send_P(200,"text/html",MAIN_page); }
+
+void handleStatus(){
+    unsigned long now=millis();
+    long rem = (relayTimedState && timedRelayEnd>now) ? timedRelayEnd-now : 0;
+    float t=0,h=0; bool ok=readSHT20(t,h);
+    String s="{";
+    s+="\"r1\":"+String(relay1State)+",";
+    s+="\"r2\":"+String(relay2State)+",";
+    s+="\"r3\":"+String(relay3State)+",";
+    s+="\"rt\":"+String(relayTimedState)+",";
+    s+="\"rt_remaining\":"+String(rem)+",";
+    s+="\"rt_duration\":"+String(timedRelayDuration);
+    if(ok){
+      s+=",\"temp\":"+String(t,2)+",\"hum\":"+String(h,2)+",\"last\":\""+formatTime(millis())+"\"";
+    }else{
+      s+=",\"last\":\""+formatTime(millis())+"\"";
+    }
+    s+="}";
+    server.send(200,"application/json",s);
+}
+
+void setRelayOutput(int pin,bool on){ digitalWrite(pin,on?LOW:HIGH); }
+
+void handleRelay1Toggle(){
+  relay1State=!relay1State; setRelayOutput(RELAY1_PIN,relay1State);
+  firebasePatch(String("{\"relay1\":")+ (relay1State?"1":"0")+"}");
+  server.send(200,"text/plain","OK");
+}
+void handleRelay2Toggle(){
+  relay2State=!relay2State; setRelayOutput(RELAY2_PIN,relay2State);
+  firebasePatch(String("{\"relay2\":")+ (relay2State?"1":"0")+"}");
+  server.send(200,"text/plain","OK");
+}
+void handleRelay3Toggle(){
+  relay3State=!relay3State; setRelayOutput(RELAY3_PIN,relay3State);
+  firebasePatch(String("{\"relay3\":")+ (relay3State?"1":"0")+"}");
+  server.send(200,"text/plain","OK");
+}
+
+void handleTimedOn(){
+    if(!server.hasArg("ms")){server.send(400,"text/plain","Missing ms");return;}
+    long ms=server.arg("ms").toInt();
+    if(ms<=0){server.send(400,"text/plain","ms>0");return;}
+
+    timedRelayDuration=ms;
+    timedRelayEnd=millis()+ms;
+    relayTimedState=true;
+    setRelayOutput(RELAYT_PIN,true);
+
+    firebasePatch("{\"timed\":{\"state\":1,\"duration_ms\":"+String(ms)+",\"end\":"+String(timedRelayEnd)+"}}");
+
+    server.send(200,"text/plain","OK");
+}
+
+void handleTimedOff(){
+    relayTimedState=false;
+    timedRelayDuration=0;
+    timedRelayEnd=0;
+    setRelayOutput(RELAYT_PIN,false);
+    firebasePatch("{\"timed\":{\"state\":0,\"duration_ms\":0,\"end\":0}}");
+    server.send(200,"text/plain","OK");
+}
+
+void applyDeviceJson(JsonVariant dv){
+    if(!dv)return;
+
+    if(dv["relay1"].is<int>()){
+        relay1State=dv["relay1"].as<int>()!=0;
+        setRelayOutput(RELAY1_PIN,relay1State);
+    }
+    if(dv["relay2"].is<int>()){
+        relay2State=dv["relay2"].as<int>()!=0;
+        setRelayOutput(RELAY2_PIN,relay2State);
+    }
+    if(dv["relay3"].is<int>()){
+        relay3State=dv["relay3"].as<int>()!=0;
+        setRelayOutput(RELAY3_PIN,relay3State);
+    }
+
+    if(dv["timed"].is<JsonObject>()){
+        JsonObject td=dv["timed"].as<JsonObject>();
+        int st = td["state"]|0;
+        unsigned long dur = td["duration_ms"]|0;
+        unsigned long end = td["end"]|0;
+
+        if(st==1 && dur>0){
+            relayTimedState=true;
+            timedRelayDuration=dur;
+
+            if(end > millis()) timedRelayEnd=end;
+            else timedRelayEnd=millis()+dur;
+
+            setRelayOutput(RELAYT_PIN,true);
+        } else {
+            relayTimedState=false;
+            timedRelayDuration=0;
+            timedRelayEnd=0;
+            setRelayOutput(RELAYT_PIN,false);
+        }
+    }
+}
+
+void publishSensorToFirebase(float t,float h){
+  String p="{\"sensor\":{\"temp\":"+String(t,2)+",\"hum\":"+String(h,2)+"}}";
+  firebasePatch(p);
+}
+//===========================Servo======================
+// PWM settings
+const int freq = 50;        // SG90 works at 50 Hz
+const int channel = 0;
+const int resolution = 16;  // 16-bit resolution
+
+// ========================= Setup =========================
+void setup(){
+  Serial.begin(115200);
+  delay(100);
+//============Servo==================
+
+  ledcSetup(channel, freq, resolution);
+  ledcAttachPin(servoPin, channel);
+
+//=======================  
+  pinMode(I2C_SDA,INPUT_PULLUP);
+  pinMode(I2C_SCL,INPUT_PULLUP);
+  Wire.begin(I2C_SDA,I2C_SCL);
+
+  pinMode(RELAY1_PIN,OUTPUT);
+  pinMode(RELAY2_PIN,OUTPUT);
+  pinMode(RELAY3_PIN,OUTPUT);
+  pinMode(RELAYT_PIN,OUTPUT);
+
+  digitalWrite(RELAY1_PIN,HIGH);
+  digitalWrite(RELAY2_PIN,HIGH);
+  digitalWrite(RELAY3_PIN,HIGH);
+  digitalWrite(RELAYT_PIN,HIGH);
+
+  WiFiManager wm;
+  wm.autoConnect("Aquarium-Controller");
+
+  Serial.print("IP: ");
+  Serial.println(WiFi.localIP());
+
+  server.on("/",handleRoot);
+  server.on("/status",handleStatus);
+  server.on("/relay1/toggle",handleRelay1Toggle);
+  server.on("/relay2/toggle",handleRelay2Toggle);
+  server.on("/relay3/toggle",handleRelay3Toggle);
+  server.on("/timed/on",handleTimedOn);
+  server.on("/timed/off",handleTimedOff);
+  server.begin();
+
+  DynamicJsonDocument doc(4096);
+  if(firebaseGet(doc)) applyDeviceJson(doc.as<JsonObject>());
+  lastFirebasePoll=millis();
+  lastSensorPublish=millis();
+}
+
+
+// ========================= Loop =========================
+void loop(){ 
+
+//================servo============
+// Move to 180 degrees
+  ledcWrite(channel, angleToPWM(180));
+  delay(60000); // 1 minute
+
+  // Move to 0 degrees
+  ledcWrite(channel, angleToPWM(0));
+  delay(60000); // 1 minute
+//================================
+  server.handleClient();
+  unsigned long now=millis();
+
+  if(relayTimedState && timedRelayEnd>0 && now>=timedRelayEnd){
+      relayTimedState=false;
+      timedRelayDuration=0;
+      timedRelayEnd=0;
+      setRelayOutput(RELAYT_PIN,false);
+      firebasePatch("{\"timed\":{\"state\":0,\"duration_ms\":0,\"end\":0}}");
+  }
+
+  if(now-lastFirebasePoll>=FIREBASE_POLL_MS){
+      lastFirebasePoll=now;
+      DynamicJsonDocument doc(4096);
+      if(firebaseGet(doc)) applyDeviceJson(doc.as<JsonObject>());
+  }
+
+  if(now-lastSensorPublish>=SENSOR_PUBLISH_MS){
+      lastSensorPublish=now;
+      float t=0,h=0;
+      if(readSHT20(t,h)) publishSensorToFirebase(t,h);
+  }
+}
+
+// Convert angle to PWM duty cycle
+int angleToPWM(int angle) {
+  int minDuty = 1300;  // ~0.5 ms
+  int maxDuty = 8200;  // ~2.5 ms
+  return map(angle, 0, 180, minDuty, maxDuty);
+}
